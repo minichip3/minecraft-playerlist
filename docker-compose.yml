@@ -1,0 +1,7 @@
+services:
+  playerlist:
+    build: .
+    ports:
+      - 3000:3000
+    environment:
+      - SERVER=jouleloversabm.mch.im

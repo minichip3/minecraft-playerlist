@@ -1,46 +1,56 @@
 const express = require('express');
-const fetch = require('node-fetch'); // node-fetch v2 사용
+const fetch = require('node-fetch').default; // node-fetch v3 사용 (.default 추가)
 const fs = require('fs');
 const path = require('path');
 const app = express();
 const port = 3000;
 
-// 환경 변수 SERVER를 사용하여 대상 서버 주소를 지정 (기본값 없음)
-const serverIp = process.env.SERVER;
+// IP 로깅 미들웨어 (프록시 뒤에 있을 경우를 대비해 trust proxy 설정도 필요할 수 있음)
+// app.set('trust proxy', true);
+app.use((req, res, next) => {
+  const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+  console.log(`Request from IP: ${clientIp}`);
+  next();
+});
+
+// 커맨드라인 인수: process.argv[2]는 서버 주소, process.argv[3]는 닉네임 파일 경로 (선택)
+const serverIp = process.argv[2];
 if (!serverIp) {
-  console.error("SERVER 환경 변수가 설정되지 않았습니다. 예: -e SERVER=your.server.address");
+  console.error("Usage: node mcplayerlist.js your.server.address [nicknames_file]");
   process.exit(1);
 }
+console.log(`Using Minecraft server address: ${serverIp}`);
 
-// 닉네임 파일은 상대경로로 ./playerlist/nicknames.json에서 로드
-const nickFilePath = path.join(__dirname, 'playerlist', 'nicknames.json');
+let nickFilePath = process.argv[3] || null; // 닉네임 파일 경로가 제공되면 사용, 아니면 null
 
-// nicknames.json 파일 캐시 및 TTL 설정 (예: 60초마다 업데이트)
+// 닉네임 데이터는 기본적으로 빈 객체입니다.
 let nicknames = {};
-let lastNicknamesUpdate = 0;
-const NICKNAMES_TTL = 60 * 1000; // 60초
 
-function updateNicknames() {
+// 만약 닉네임 파일이 제공되었다면 파일을 로드합니다.
+if (nickFilePath) {
+  nickFilePath = path.isAbsolute(nickFilePath)
+    ? nickFilePath
+    : path.join(__dirname, nickFilePath);
   try {
     if (fs.existsSync(nickFilePath)) {
       const data = fs.readFileSync(nickFilePath, 'utf-8');
       nicknames = JSON.parse(data);
-      console.log("닉네임 데이터 업데이트 완료:", nicknames);
+      console.log("닉네임 데이터 로드 완료:", nicknames);
     } else {
       console.warn(`경고: 닉네임 파일이 존재하지 않습니다 (${nickFilePath}). 빈 닉네임 데이터로 진행합니다.`);
       nicknames = {};
     }
   } catch (err) {
-    console.error("nicknames.json 파일 업데이트 실패:", err);
+    console.error("닉네임 파일 로드 실패:", err);
     nicknames = {};
   }
-  lastNicknamesUpdate = Date.now();
+} else {
+  console.log("닉네임 파일 미지정: 플레이어 닉네임은 표시되지 않습니다.");
 }
 
-// 초기 닉네임 로드
-updateNicknames();
-
+// --------------------
 // 플레이어 데이터 캐시 (메모리 내, TTL: 10분)
+// --------------------
 const playerCache = {};
 const CACHE_TTL = 10 * 60 * 1000; // 10분
 
@@ -56,18 +66,46 @@ function setCachedPlayer(username, data) {
   playerCache[username] = { data, timestamp: Date.now() };
 }
 
-// /status 엔드포인트: 서버 상태 및 플레이어 목록 집계
-app.get('/status', async (req, res) => {
-  // 브라우저 캐시를 방지하기 위해 캐시 제어 헤더 설정
-  res.set('Cache-Control', 'no-store');
-
+// --------------------
+// 사전 업데이트: 플레이어 데이터를 10분마다 업데이트
+// --------------------
+async function updateAllPlayers() {
   try {
-    // 닉네임 데이터 업데이트: TTL이 지나면 파일을 다시 읽음
-    if (Date.now() - lastNicknamesUpdate > NICKNAMES_TTL) {
-      updateNicknames();
+    const statusResponse = await fetch(`https://api.mcsrvstat.us/2/${serverIp}`);
+    const statusData = await statusResponse.json();
+
+    if (!statusData.online) {
+      console.log("서버가 오프라인입니다. 플레이어 데이터 업데이트 건너뜁니다.");
+      return;
     }
-    
-    // mcsrvstat.us API로 서버 상태 가져오기
+
+    const players = statusData.players.list || [];
+    console.log("사전 업데이트할 플레이어 목록:", players);
+
+    await Promise.all(players.map(async username => {
+      try {
+        const response = await fetch(`https://api.ashcon.app/mojang/v2/user/${username}`);
+        const data = await response.json();
+        setCachedPlayer(username, data);
+      } catch (err) {
+        console.error(`Preload failed for ${username}:`);
+      }
+    }));
+  } catch (err) {
+    console.error("플레이어 데이터를 사전 업데이트하는 중 오류 발생:", err);
+  }
+}
+
+// 초기 사전 업데이트 실행 및 10분마다 반복
+updateAllPlayers();
+setInterval(updateAllPlayers, CACHE_TTL);
+
+// --------------------
+// /status 엔드포인트: 서버 상태 및 플레이어 목록 집계
+// --------------------
+app.get('/status', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
     const statusResponse = await fetch(`https://api.mcsrvstat.us/2/${serverIp}`);
     const statusData = await statusResponse.json();
 
@@ -75,10 +113,8 @@ app.get('/status', async (req, res) => {
       return res.json({ online: false, message: "서버 오프라인" });
     }
 
-    // 플레이어 목록 (없으면 빈 배열)
     const players = statusData.players.list || [];
 
-    // 각 플레이어에 대해 캐시 또는 Ashcon API로 데이터 가져오기
     const playersData = await Promise.all(players.map(async username => {
       let playerData = getCachedPlayer(username);
       if (!playerData) {
@@ -87,17 +123,14 @@ app.get('/status', async (req, res) => {
           playerData = await response.json();
           setCachedPlayer(username, playerData);
         } catch (err) {
-          console.error("플레이어 데이터 로드 오류:", username, err);
+          console.error(`Preload failed for ${username}:`);
           playerData = null;
         }
       }
-      // 플레이어 데이터가 있으면 Crafatar API로 얼굴 이미지 URL 생성 (32x32)  
-      // 캐시 배스팅: ts 쿼리 파라미터로 서버 타임스탬프 추가
       let headImageUrl = "";
       if (playerData && playerData.uuid) {
         headImageUrl = `https://crafatar.com/avatars/${playerData.uuid}?size=32&overlay&ts=${playerCache[username] ? playerCache[username].timestamp : Date.now()}`;
       }
-      // 닉네임 파일에 정의된 닉네임 확인
       const nickname = nicknames[username] || null;
       return {
         username,
@@ -105,7 +138,7 @@ app.get('/status', async (req, res) => {
         headImageUrl
       };
     }));
-
+    
     res.json({
       online: true,
       playersOnline: statusData.players.online,
@@ -117,9 +150,10 @@ app.get('/status', async (req, res) => {
   }
 });
 
+// --------------------
 // 루트 경로('/')에서 HTML 페이지 제공 (자동 새로고침, 60초 간격)
+// --------------------
 app.get('/', (req, res) => {
-  // HTML 응답에도 캐시 방지 헤더 설정
   res.set('Cache-Control', 'no-store');
   res.send(`<!DOCTYPE html>
 <html lang="ko">
@@ -213,7 +247,9 @@ app.get('/', (req, res) => {
 </html>`);
 });
 
+// --------------------
 // 서버 실행
+// --------------------
 app.listen(port, () => {
   console.log(`서버가 http://localhost:${port} 에서 실행 중입니다.`);
 });
