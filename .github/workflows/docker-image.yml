@@ -32,10 +32,9 @@ jobs:
           password: ${{ secrets.GHCR_TOKEN }}
 
       # 멀티 아키텍처 이미지 빌드 및 GHCR에 푸시
-      - name: Build and push multi-arch Docker image
+      - name: Build and Push
         uses: docker/build-push-action@v4
         with:
-          context: .
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ghcr.io/${{ github.repository }}:${{ github.event.inputs.tag }}
