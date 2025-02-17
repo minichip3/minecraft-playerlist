@@ -1,9 +1,12 @@
 name: Docker Image CI
 
 on:
-  push:
-    branches: [ "main" ]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Docker 이미지 태그를 입력하세요 (예: v1.0.0)'
+        required: true
+        default: 'latest'
 
 jobs:
   build:
@@ -20,18 +23,13 @@ jobs:
       - name: Setup Buildx
         uses: docker/setup-buildx-action@v1.6.0
 
-      # GHCR에 로그인 (GHCR 토큰을 secrets에 등록해두어야 함)
+      # GHCR에 로그인 (GHCR 토큰은 repository secret에 등록되어 있어야 함)
       - name: Login to GHCR
         uses: docker/login-action@v2
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GHCR_TOKEN }}
-
-      # 현재 날짜를 태그로 사용하기 위해 환경 변수에 저장 (예: YYYYMMDD 형식)
-      - name: Set date tag
-        id: set_date_tag
-        run: echo "TAG=$(date +%Y%m%d)" >> $GITHUB_ENV
 
       # 멀티 아키텍처 이미지 빌드 및 GHCR에 푸시
       - name: Build and push multi-arch Docker image
@@ -40,4 +38,4 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/minecraft-playerlist:${{ env.TAG }}
+          tags: ghcr.io/${{ github.repository_owner }}/${{ github.repository }}:${{ github.event.inputs.tag }}
