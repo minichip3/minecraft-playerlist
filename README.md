@@ -8,7 +8,7 @@
 2. `npm install express node-fetch`하여 의존성 패키지를 설치한다.
 3. 다음 명령어를 실행한다.
 ```
-node mcplayerlist.js your.server.address /path/to/nicknames.json
+node mcplayerlist.js -p 3000 your.server.address /path/to/nicknames.json
 ```
 
 # Docker로 사용법
