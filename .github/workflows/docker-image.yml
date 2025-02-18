@@ -1,15 +1,11 @@
 name: Docker Image CI
 
 on:
-  # push:
-  #   tags:
-  #     - '*'
   workflow_dispatch:
     inputs:
       tag:
         description: 'Docker 이미지 태그를 입력하세요 (예: v1.0.0)'
         required: true
-        default: 'latest'
 
 jobs:
   build:
@@ -43,7 +39,7 @@ jobs:
           provenance: false
           tags: |
             ghcr.io/${{ github.repository }}:latest
-          # ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+            ghcr.io/${{ github.repository }}:${{ github.event.inputs.tag }}
           platforms: |
             linux/amd64
             linux/arm64
