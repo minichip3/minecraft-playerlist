@@ -1,8 +1,7 @@
 # Description
 <img width="690" alt="스크린샷 2025-02-18 오전 11 46 25" src="https://github.com/user-attachments/assets/a95d816a-e3b6-4781-85c9-e001ef76002f" />
 
-An Website where can view players on a server with [Nickname][nickname-link] plugin.
-[nickname-link]: https://github.com/minichip3/minecraft-nickname
+An Website where can view players on a server with [Nickname Plugin](https://github.com/minichip3/minecraft-nickname).
 
 # Node.js Usage
 1. Download mcplayerlist.js
