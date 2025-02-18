@@ -3,7 +3,38 @@ const fetch = require('node-fetch').default; // node-fetch v3 사용 (.default �
 const fs = require('fs');
 const path = require('path');
 const app = express();
-const port = 3000;
+
+// 기본 포트 설정
+let port = 3000;
+let serverIp = null;
+let nickFilePath = null;
+
+// 커맨드라인 인수 파싱 (예: node mcplayerlist.js -p 3000 your.server.address [nicknames_file])
+const args = process.argv.slice(2);
+for (let i = 0; i < args.length; i++) {
+  const arg = args[i];
+  if (arg === '-p' || arg === '--port') {
+    if (i + 1 < args.length) {
+      port = parseInt(args[i + 1], 10);
+      i++; // 포트 번호 건너뜁니다.
+    } else {
+      console.error("포트 번호가 제공되지 않았습니다. Usage: -p port");
+      process.exit(1);
+    }
+  } else if (!serverIp) {
+    serverIp = arg;
+  } else if (!nickFilePath) {
+    nickFilePath = arg;
+  }
+}
+
+if (!serverIp) {
+  console.error("Usage: node mcplayerlist.js -p port your.server.address [nicknames_file]");
+  process.exit(1);
+}
+
+console.log(`Using port: ${port}`);
+console.log(`Using Minecraft server address: ${serverIp}`);
 
 // IP 로깅 미들웨어 (프록시 뒤에 있을 경우를 대비해 trust proxy 설정도 필요할 수 있음)
 // app.set('trust proxy', true);
@@ -12,16 +43,6 @@ app.use((req, res, next) => {
   console.log(`Request from IP: ${clientIp}`);
   next();
 });
-
-// 커맨드라인 인수: process.argv[2]는 서버 주소, process.argv[3]는 닉네임 파일 경로 (선택)
-const serverIp = process.argv[2];
-if (!serverIp) {
-  console.error("Usage: node mcplayerlist.js your.server.address [nicknames_file]");
-  process.exit(1);
-}
-console.log(`Using Minecraft server address: ${serverIp}`);
-
-let nickFilePath = process.argv[3] || null; // 닉네임 파일 경로가 제공되면 사용, 아니면 null
 
 // 닉네임 데이터는 기본적으로 빈 객체입니다.
 let nicknames = {};
@@ -35,7 +56,6 @@ if (nickFilePath) {
     if (fs.existsSync(nickFilePath)) {
       const data = fs.readFileSync(nickFilePath, 'utf-8');
       nicknames = JSON.parse(data);
-      console.log("닉네임 데이터 로드 완료:", nicknames);
     } else {
       console.warn(`경고: 닉네임 파일이 존재하지 않습니다 (${nickFilePath}). 빈 닉네임 데이터로 진행합니다.`);
       nicknames = {};
@@ -80,7 +100,6 @@ async function updateAllPlayers() {
     }
 
     const players = statusData.players.list || [];
-    console.log("사전 업데이트할 플레이어 목록:", players);
 
     await Promise.all(players.map(async username => {
       try {
