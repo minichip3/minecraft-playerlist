@@ -48,24 +48,18 @@ app.use((req, res, next) => {
 let nicknames = {};
 
 // 만약 닉네임 파일이 제공되었다면 파일을 로드합니다.
+updateNicknames();
+
+// 만약 닉네임 파일이 지정되었다면, 파일 변경 감지 시 업데이트
 if (nickFilePath) {
-  nickFilePath = path.isAbsolute(nickFilePath)
-    ? nickFilePath
-    : path.join(__dirname, nickFilePath);
-  try {
-    if (fs.existsSync(nickFilePath)) {
-      const data = fs.readFileSync(nickFilePath, 'utf-8');
-      nicknames = JSON.parse(data);
-    } else {
-      console.warn(`경고: 닉네임 파일이 존재하지 않습니다 (${nickFilePath}). 빈 닉네임 데이터로 진행합니다.`);
-      nicknames = {};
+  // fs.watchFile을 사용하여 60초마다 파일의 변경 여부를 확인합니다.
+  fs.watchFile(nickFilePath, { interval: 60000 }, (curr, prev) => {
+    // 파일의 수정 시간이 변경되었으면 업데이트
+    if (curr.mtime > prev.mtime) {
+      console.log("닉네임 파일 변경 감지 - 업데이트 수행");
+      updateNicknames();
     }
-  } catch (err) {
-    console.error("닉네임 파일 로드 실패:", err);
-    nicknames = {};
-  }
-} else {
-  console.log("닉네임 파일 미지정: 플레이어 닉네임은 표시되지 않습니다.");
+  });
 }
 
 // --------------------
@@ -73,6 +67,30 @@ if (nickFilePath) {
 // --------------------
 const playerCache = {};
 const CACHE_TTL = 10 * 60 * 1000; // 10분
+
+// 닉네임 업데이트 함수
+function updateNicknames() {
+  if (nickFilePath) {
+    nickFilePath = path.isAbsolute(nickFilePath)
+      ? nickFilePath
+      : path.join(__dirname, nickFilePath);
+    try {
+      if (fs.existsSync(nickFilePath)) {
+        const data = fs.readFileSync(nickFilePath, 'utf-8');
+        nicknames = JSON.parse(data);
+        console.log(`닉네임 파일 로드 완료!`);
+      } else {
+        console.warn(`경고: 닉네임 파일이 존재하지 않습니다 (${nickFilePath}). 빈 닉네임 데이터로 진행합니다.`);
+        nicknames = {};
+      }
+    } catch (err) {
+      console.error("닉네임 파일 로드 실패:", err);
+      nicknames = {};
+    }
+  } else {
+    console.log("닉네임 파일 미지정: 플레이어 닉네임은 표시되지 않습니다.");
+  }
+}
 
 function getCachedPlayer(username) {
   const entry = playerCache[username];
