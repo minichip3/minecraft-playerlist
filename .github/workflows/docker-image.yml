@@ -43,7 +43,7 @@ jobs:
           provenance: false
           tags: |
             ghcr.io/${{ github.repository }}:latest
-            ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+          # ghcr.io/${{ github.repository }}:${{ github.ref_name }}
           platforms: |
             linux/amd64
             linux/arm64
