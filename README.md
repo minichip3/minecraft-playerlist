@@ -8,7 +8,9 @@
 
 # Docker Usage
 Basic Usage
-`docker run -d -p 3000:3000 -e SERVER=your.server.address ghcr.io/minichip3/minecraft-playerlist:latest`
+```
+docker run -d -p 3000:3000 -e SERVER=your.server.address ghcr.io/minichip3/minecraft-playerlist:latest
+```
 
 With Nickname Feature
 ```
