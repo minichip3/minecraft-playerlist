@@ -11,7 +11,9 @@ Basic Usage
 `docker run -d -p 3000:3000 -e SERVER=your.server.address ghcr.io/minichip3/minecraft-playerlist:latest`
 
 With Nickname Feature
-`docker run -d -p 3000:3000 -e SERVER=your.server.address -v ${PWD}/nicknames.json:/playerlist/nicknames.json ghcr.io/minichip3/minecraft-playerlist:latest`
+```
+docker run -d -p 3000:3000 -e SERVER=your.server.address -v ${PWD}/nicknames.json:/playerlist/nicknames.json ghcr.io/minichip3/minecraft-playerlist:latest
+```
 `nicknames.json`File should be like this:
 ```
 {
