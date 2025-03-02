@@ -10,6 +10,10 @@
 ```
 node mcplayerlist.js -p 3000 your.server.address /path/to/nicknames.json
 ```
+HTTPS로 여는 경우에는 다음과 같은 명령어를 사용한다.
+```
+node mcplayerlist.js -p 3000 --https-port 3001 --https-cert /path/to/cert --https-key /path/to/key your.server.address /path/to/nicknames.json
+```
 
 # Docker로 사용법
 기본 사용법
@@ -28,4 +32,9 @@ docker run -d -p 3000:3000 -e SERVER=your.server.address -v ${PWD}/nicknames.jso
   "player2": "nickname2",
   "player3": "nickname3"
 }
+```
+
+HTTPS 기능과 함께 사용
+```
+docker run -d -p 3000:3000 -e SERVER=your.server.address -e $HTTPSCERT /cert.pem -e $HTTPSKEY /key.pem -v ${PWD}/nicknames.json:/playerlist/nicknames.json -v ${PWD}/cert/cert.pem:/cert.pem -v ${PWD}/cert/key.pem:/key.pem ghcr.io/minichip3/minecraft-playerlist:latest
 ```
