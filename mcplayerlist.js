@@ -2,14 +2,18 @@ const express = require('express');
 const fetch = require('node-fetch').default; // node-fetch v3 사용 (.default 추가)
 const fs = require('fs');
 const path = require('path');
+const https = require('https');
 const app = express();
 
-// 기본 포트 설정
+// 기본 포트 및 변수 설정
 let port = 3000;
+let httpsPort = null;
+let httpsCertPath = null;
+let httpsKeyPath = null;
 let serverIp = null;
 let nickFilePath = null;
 
-// 커맨드라인 인수 파싱 (예: node mcplayerlist.js -p 3000 your.server.address [nicknames_file])
+// 커맨드라인 인수 파싱 (예: node mcplayerlist.js -p 3000 your.server.address [nicknames_file] --https-port 8443 --https-cert ./cert.pem --https-key ./key.pem)
 const args = process.argv.slice(2);
 for (let i = 0; i < args.length; i++) {
   const arg = args[i];
@@ -21,6 +25,30 @@ for (let i = 0; i < args.length; i++) {
       console.error("포트 번호가 제공되지 않았습니다. Usage: -p port");
       process.exit(1);
     }
+  } else if (arg === '--https-port') {
+    if (i + 1 < args.length) {
+      httpsPort = parseInt(args[i + 1], 10);
+      i++;
+    } else {
+      console.error("--https-port 옵션에는 포트 번호가 필요합니다.");
+      process.exit(1);
+    }
+  } else if (arg === '--https-cert') {
+    if (i + 1 < args.length) {
+      httpsCertPath = args[i + 1];
+      i++;
+    } else {
+      console.error("--https-cert 옵션에는 인증서 경로가 필요합니다.");
+      process.exit(1);
+    }
+  } else if (arg === '--https-key') {
+    if (i + 1 < args.length) {
+      httpsKeyPath = args[i + 1];
+      i++;
+    } else {
+      console.error("--https-key 옵션에는 키 파일 경로가 필요합니다.");
+      process.exit(1);
+    }
   } else if (!serverIp) {
     serverIp = arg;
   } else if (!nickFilePath) {
@@ -29,14 +57,17 @@ for (let i = 0; i < args.length; i++) {
 }
 
 if (!serverIp) {
-  console.error("Usage: node mcplayerlist.js -p port your.server.address [nicknames_file]");
+  console.error("Usage: node mcplayerlist.js -p port your.server.address [nicknames_file] [--https-port port --https-cert cert_file --https-key key_file]");
   process.exit(1);
 }
 
 console.log(`Using port: ${port}`);
 console.log(`Using Minecraft server address: ${serverIp}`);
+if (httpsPort && httpsCertPath && httpsKeyPath) {
+  console.log(`HTTPS 옵션 사용: 포트 ${httpsPort}, 인증서 ${httpsCertPath}, 키 ${httpsKeyPath}`);
+}
 
-// IP 로깅 미들웨어 (프록시 뒤에 있을 경우를 대비해 trust proxy 설정도 필요할 수 있음)
+// IP 로깅 미들웨어 (프록시 뒤에 있을 경우를 대비해 trust proxy 설정 필요 시 app.set('trust proxy', true) 추가)
 // app.set('trust proxy', true);
 app.use((req, res, next) => {
   const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
@@ -47,28 +78,7 @@ app.use((req, res, next) => {
 // 닉네임 데이터는 기본적으로 빈 객체입니다.
 let nicknames = {};
 
-// 만약 닉네임 파일이 제공되었다면 파일을 로드합니다.
-updateNicknames();
-
-// 만약 닉네임 파일이 지정되었다면, 파일 변경 감지 시 업데이트
-if (nickFilePath) {
-  // fs.watchFile을 사용하여 60초마다 파일의 변경 여부를 확인합니다.
-  fs.watchFile(nickFilePath, { interval: 60000 }, (curr, prev) => {
-    // 파일의 수정 시간이 변경되었으면 업데이트
-    if (curr.mtime > prev.mtime) {
-      console.log("닉네임 파일 변경 감지 - 업데이트 수행");
-      updateNicknames();
-    }
-  });
-}
-
-// --------------------
-// 플레이어 데이터 캐시 (메모리 내, TTL: 10분)
-// --------------------
-const playerCache = {};
-const CACHE_TTL = 10 * 60 * 1000; // 10분
-
-// 닉네임 업데이트 함수
+// 닉네임 파일 로드 및 업데이트 함수
 function updateNicknames() {
   if (nickFilePath) {
     nickFilePath = path.isAbsolute(nickFilePath)
@@ -78,7 +88,7 @@ function updateNicknames() {
       if (fs.existsSync(nickFilePath)) {
         const data = fs.readFileSync(nickFilePath, 'utf-8');
         nicknames = JSON.parse(data);
-        console.log(`닉네임 파일 로드 완료!`);
+        console.log("닉네임 파일 로드 완료!");
       } else {
         console.warn(`경고: 닉네임 파일이 존재하지 않습니다 (${nickFilePath}). 빈 닉네임 데이터로 진행합니다.`);
         nicknames = {};
@@ -91,6 +101,25 @@ function updateNicknames() {
     console.log("닉네임 파일 미지정: 플레이어 닉네임은 표시되지 않습니다.");
   }
 }
+
+// 초기 닉네임 로드
+updateNicknames();
+
+// 파일 변경 감지: 닉네임 파일이 지정된 경우, 60초 간격으로 파일 변경 감지하여 업데이트
+if (nickFilePath) {
+  fs.watchFile(nickFilePath, { interval: 60000 }, (curr, prev) => {
+    if (curr.mtime > prev.mtime) {
+      console.log("닉네임 파일 변경 감지 - 업데이트 수행");
+      updateNicknames();
+    }
+  });
+}
+
+// --------------------
+// 플레이어 데이터 캐시 (메모리 내, TTL: 10분)
+// --------------------
+const playerCache = {};
+const CACHE_TTL = 10 * 60 * 1000; // 10분
 
 function getCachedPlayer(username) {
   const entry = playerCache[username];
@@ -118,14 +147,21 @@ async function updateAllPlayers() {
     }
 
     const players = statusData.players.list || [];
+    console.log("사전 업데이트할 플레이어 목록:", players);
 
     await Promise.all(players.map(async username => {
       try {
         const response = await fetch(`https://api.ashcon.app/mojang/v2/user/${username}`);
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error(`API 요청 실패 (${username}): ${response.status} ${response.statusText}\n${errorText}`);
+          throw new Error(`API 요청 실패: ${response.statusText}`);
+        }
         const data = await response.json();
         setCachedPlayer(username, data);
+        console.log(`Preloaded data for ${username}`);
       } catch (err) {
-        console.error(`Preload failed for ${username}:`);
+        console.error(`Couldn't Preload data for ${username}`);
       }
     }));
   } catch (err) {
@@ -155,12 +191,14 @@ app.get('/status', async (req, res) => {
     const playersData = await Promise.all(players.map(async username => {
       let playerData = getCachedPlayer(username);
       if (!playerData) {
+        console.log(`Cache miss for ${username}. Loading data...`);
         try {
           const response = await fetch(`https://api.ashcon.app/mojang/v2/user/${username}`);
           playerData = await response.json();
           setCachedPlayer(username, playerData);
+          console.log(`Loaded data for ${username}`);
         } catch (err) {
-          console.error(`Preload failed for ${username}:`);
+          console.error(`Couldn't Preload data for ${username}`);
           playerData = null;
         }
       }
@@ -188,7 +226,7 @@ app.get('/status', async (req, res) => {
 });
 
 // --------------------
-// 루트 경로('/')에서 HTML 페이지 제공 (자동 새로고침, 60초 간격)
+// 루트 경로('/')에서 HTML 파일 제공
 // --------------------
 app.get('/', (req, res) => {
   res.set('Cache-Control', 'no-store');
@@ -285,8 +323,26 @@ app.get('/', (req, res) => {
 });
 
 // --------------------
-// 서버 실행
+// 서버 실행: HTTP 서버는 항상 실행, HTTPS 옵션이 모두 지정되면 HTTPS 서버도 실행
 // --------------------
 app.listen(port, () => {
-  console.log(`서버가 http://localhost:${port} 에서 실행 중입니다.`);
+  console.log(`HTTP 서버가 http://localhost:${port} 에서 실행 중입니다.`);
 });
+
+if (httpsPort && httpsCertPath && httpsKeyPath) {
+  // 절대 경로 변환
+  httpsCertPath = path.isAbsolute(httpsCertPath)
+    ? httpsCertPath
+    : path.join(__dirname, httpsCertPath);
+  httpsKeyPath = path.isAbsolute(httpsKeyPath)
+    ? httpsKeyPath
+    : path.join(__dirname, httpsKeyPath);
+
+  const cert = fs.readFileSync(httpsCertPath, 'utf-8');
+  const key = fs.readFileSync(httpsKeyPath, 'utf-8');
+  const httpsOptions = { key, cert };
+
+  https.createServer(httpsOptions, app).listen(httpsPort, () => {
+    console.log(`HTTPS 서버가 https://localhost:${httpsPort} 에서 실행 중입니다.`);
+  });
+}
