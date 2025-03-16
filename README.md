@@ -28,9 +28,14 @@ docker run -d -p 3000:3000 -e SERVER=your.server.address -v ${PWD}/nicknames.jso
 `nicknames.json`파일은 다음과 같은 형식입니다:
 ```
 {
-  "player1": "nickname1",
-  "player2": "nickname2",
-  "player3": "nickname3"
+    "uuid1": {
+        "nick": "nickname1",
+        "name": "playername1"
+    },
+    "uuid2": {
+        "nick": "nickname2",
+        "name": "playername2"
+    }
 }
 ```
 
