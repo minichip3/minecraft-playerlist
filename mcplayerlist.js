@@ -13,7 +13,8 @@ let httpsKeyPath = null;
 let serverIp = null;
 let nickFilePath = null;
 
-// 커맨드라인 인수 파싱 (예: node mcplayerlist.js -p 3000 your.server.address [nicknames_file] --https-port 8443 --https-cert ./cert.pem --https-key ./key.pem)
+// 커맨드라인 인수 파싱 
+// 예: node mcplayerlist.js -p 3000 your.server.address [nicknames_file] --https-port 8443 --https-cert ./cert.pem --https-key ./key.pem
 const args = process.argv.slice(2);
 for (let i = 0; i < args.length; i++) {
   const arg = args[i];
@@ -67,15 +68,16 @@ if (httpsPort && httpsCertPath && httpsKeyPath) {
   console.log(`HTTPS 옵션 사용: 포트 ${httpsPort}, 인증서 ${httpsCertPath}, 키 ${httpsKeyPath}`);
 }
 
-// IP 로깅 미들웨어 (프록시 뒤에 있을 경우를 대비해 trust proxy 설정 필요 시 app.set('trust proxy', true) 추가)
-// app.set('trust proxy', true);
+// IP 로깅 미들웨어 (프록시 뒤에 있을 경우 필요 시 app.set('trust proxy', true) 추가)
 app.use((req, res, next) => {
   const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
   console.log(`Request from IP: ${clientIp}`);
   next();
 });
 
-// 닉네임 데이터는 기본적으로 빈 객체입니다.
+// --------------------
+// 닉네임 파일 로드 및 업데이트 (파일 형식: { "uuid": { "name": "실제이름", "nick": "닉네임" }, ... } )
+// --------------------
 let nicknames = {};
 
 // 닉네임 파일 로드 및 업데이트 함수
@@ -115,70 +117,10 @@ if (nickFilePath) {
   });
 }
 
-// --------------------
-// 플레이어 데이터 캐시 (메모리 내, TTL: 10분)
-// --------------------
-const playerCache = {};
-const CACHE_TTL = 10 * 60 * 1000; // 10분
-
-function getCachedPlayer(username) {
-  const entry = playerCache[username];
-  if (entry && (Date.now() - entry.timestamp < CACHE_TTL)) {
-    return entry.data;
-  }
-  return null;
-}
-
-function setCachedPlayer(username, data) {
-  playerCache[username] = { data, timestamp: Date.now() };
-}
-
-// --------------------
-// 사전 업데이트: 플레이어 데이터를 10분마다 업데이트
-// --------------------
-async function updateAllPlayers() {
-  try {
-    const statusResponse = await fetch(`https://api.mcsrvstat.us/2/${serverIp}`);
-    const statusData = await statusResponse.json();
-
-    if (!statusData.online) {
-      console.log("서버가 오프라인입니다. 플레이어 데이터 업데이트 건너뜁니다.");
-      return;
-    }
-
-    const players = statusData.players.list || [];
-    console.log("사전 업데이트할 플레이어 목록:", players);
-
-    await Promise.all(players.map(async username => {
-      try {
-        const response = await fetch(`https://api.ashcon.app/mojang/v2/user/${username}`);
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error(`API 요청 실패 (${username}): ${response.status} ${response.statusText}\n${errorText}`);
-          throw new Error(`API 요청 실패: ${response.statusText}`);
-        }
-        const data = await response.json();
-        setCachedPlayer(username, data);
-        console.log(`Preloaded data for ${username}`);
-      } catch (err) {
-        console.error(`Couldn't Preload data for ${username}`);
-      }
-    }));
-  } catch (err) {
-    console.error("플레이어 데이터를 사전 업데이트하는 중 오류 발생:", err);
-  }
-}
-
-// 초기 사전 업데이트 실행 및 10분마다 반복
-updateAllPlayers();
-setInterval(updateAllPlayers, CACHE_TTL);
-
-// --------------------
-// /status 엔드포인트: 서버 상태 및 플레이어 목록 집계
-// --------------------
 app.get('/status', async (req, res) => {
   res.set('Cache-Control', 'no-store');
   try {
+    // mcsrvstat.us API로 서버 상태와 플레이어 이름 목록을 가져옵니다.
     const statusResponse = await fetch(`https://api.mcsrvstat.us/2/${serverIp}`);
     const statusData = await statusResponse.json();
 
@@ -188,32 +130,44 @@ app.get('/status', async (req, res) => {
 
     const players = statusData.players.list || [];
 
-    const playersData = await Promise.all(players.map(async username => {
-      let playerData = getCachedPlayer(username);
-      if (!playerData) {
-        console.log(`Cache miss for ${username}. Loading data...`);
+    const playersData = await Promise.all(players.map(async playerName => {
+      let foundUuid = null;
+      let foundData = null;
+      // 우선 닉네임 파일에서 UUID와 플레이어 정보를 찾습니다.
+      for (const uuid in nicknames) {
+        if (nicknames[uuid].name === playerName) {
+          foundUuid = uuid;
+          foundData = nicknames[uuid];
+          break;
+        }
+      }
+      // 파일에 정보가 없으면 API를 통해 데이터를 가져옵니다.
+      if (!foundUuid) {
+        console.log(`File lookup miss for ${playerName}. Using API...`);
         try {
-          const response = await fetch(`https://api.ashcon.app/mojang/v2/user/${username}`);
-          playerData = await response.json();
-          setCachedPlayer(username, playerData);
-          console.log(`Loaded data for ${username}`);
+          const response = await fetch(`https://api.ashcon.app/mojang/v2/user/${playerName}`);
+          const apiData = await response.json();
+          foundUuid = apiData.uuid;
+          // API에서는 닉네임 정보는 제공되지 않으므로, only 실제 이름을 사용합니다.
+          foundData = { name: apiData.username };
+          console.log(`API loaded data for ${playerName} (UUID: ${foundUuid})`);
         } catch (err) {
-          console.error(`Couldn't Preload data for ${username}`);
-          playerData = null;
+          console.error(`Couldn't load data for ${playerName}`);
         }
       }
       let headImageUrl = "";
-      if (playerData && playerData.uuid) {
-        headImageUrl = `https://crafatar.com/avatars/${playerData.uuid}?size=32&overlay&ts=${playerCache[username] ? playerCache[username].timestamp : Date.now()}`;
+      if (foundUuid) {
+        headImageUrl = `https://crafatar.com/avatars/${foundUuid}?size=32&overlay`;
       }
-      const nickname = nicknames[username] || null;
+      // 최종 플레이어 이름: 파일 정보가 있다면 "nick (name)" 형식, 없으면 단순히 이름(또는 playerName)
+      const displayName = foundData && foundData.nick ? `${foundData.nick} (${foundData.name})` : (foundData ? foundData.name : playerName);
       return {
-        username,
-        nickname,
-        headImageUrl
+        uuid: foundUuid,
+        username: displayName,
+        headImageUrl: headImageUrl
       };
     }));
-    
+
     res.json({
       online: true,
       playersOnline: statusData.players.online,
@@ -230,96 +184,7 @@ app.get('/status', async (req, res) => {
 // --------------------
 app.get('/', (req, res) => {
   res.set('Cache-Control', 'no-store');
-  res.send(`<!DOCTYPE html>
-<html lang="ko">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Minecraft 서버 접속 플레이어 확인</title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      text-align: center;
-      margin-top: 50px;
-      transition: background-color 0.3s, color 0.3s;
-    }
-    #status {
-      margin-top: 20px;
-      font-size: 18px;
-    }
-    ul {
-      list-style-type: none;
-      padding: 0;
-    }
-    li {
-      font-size: 16px;
-      margin-top: 5px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    img {
-      width: 32px;
-      height: 32px;
-      margin-right: 10px;
-    }
-    /* 기본 테마 */
-    body {
-      background-color: #ffffff;
-      color: #000000;
-    }
-    /* 다크 모드 */
-    @media (prefers-color-scheme: dark) {
-      body {
-        background-color: #121212;
-        color: #ffffff;
-      }
-    }
-  </style>
-</head>
-<body>
-  <h1>Minecraft 서버 접속 플레이어 확인</h1>
-  <div id="status">서버 상태를 확인 중입니다...</div>
-  <ul id="playerList"></ul>
-  <script>
-    async function loadStatus() {
-      const statusElement = document.getElementById('status');
-      const playerList = document.getElementById('playerList');
-      statusElement.innerText = "서버 상태를 확인 중입니다...";
-      playerList.innerHTML = "";
-      try {
-        const response = await fetch('/status', { cache: "no-store" });
-        const data = await response.json();
-        if (!data.online) {
-          statusElement.innerText = "서버가 오프라인입니다.";
-          return;
-        }
-        statusElement.innerText = \`서버가 온라인입니다! 현재 접속자 수: \${data.playersOnline}\`;
-        data.players.forEach(player => {
-          const li = document.createElement('li');
-          const img = document.createElement('img');
-          img.src = player.headImageUrl;
-          img.alt = player.username;
-          li.appendChild(img);
-          let displayName = player.username;
-          if (player.nickname) {
-            displayName = \`\${player.nickname} (\${player.username})\`;
-          }
-          li.appendChild(document.createTextNode(displayName));
-          playerList.appendChild(li);
-        });
-      } catch (err) {
-        console.error(err);
-        statusElement.innerText = "서버 상태를 불러오는 중 오류가 발생했습니다.";
-      }
-    }
-    document.addEventListener("DOMContentLoaded", () => {
-      loadStatus();
-      setInterval(loadStatus, 60000); // 60초마다 자동 새로고침
-    });
-  </script>
-</body>
-</html>`);
+  res.sendFile(path.join(__dirname, 'index.html'));
 });
 
 // --------------------

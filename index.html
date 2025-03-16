@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Minecraft 서버 접속 플레이어 확인</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      margin-top: 50px;
+      transition: background-color 0.3s, color 0.3s;
+    }
+    #status {
+      margin-top: 20px;
+      font-size: 18px;
+    }
+    ul {
+      list-style-type: none;
+      padding: 0;
+    }
+    li {
+      font-size: 16px;
+      margin-top: 5px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    img {
+      width: 32px;
+      height: 32px;
+      margin-right: 10px;
+    }
+    /* 기본 테마 */
+    body {
+      background-color: #ffffff;
+      color: #000000;
+    }
+    /* 다크 모드 */
+    @media (prefers-color-scheme: dark) {
+      body {
+        background-color: #121212;
+        color: #ffffff;
+      }
+    }
+  </style>
+</head>
+<body>
+  <h1>Minecraft 서버 접속 플레이어 확인</h1>
+  <div id="status">서버 상태를 확인 중입니다...</div>
+  <ul id="playerList"></ul>
+  <script>
+    async function loadStatus() {
+      const statusElement = document.getElementById('status');
+      const playerList = document.getElementById('playerList');
+      statusElement.innerText = "서버 상태를 확인 중입니다...";
+      playerList.innerHTML = "";
+      try {
+        const response = await fetch('/status', { cache: "no-store" });
+        const data = await response.json();
+        if (!data.online) {
+          statusElement.innerText = "서버가 오프라인입니다.";
+          return;
+        }
+        statusElement.innerText = `서버가 온라인입니다! 현재 접속자 수: ${data.playersOnline}`;
+        data.players.forEach(player => {
+          const li = document.createElement('li');
+          const img = document.createElement('img');
+          img.src = player.headImageUrl;
+          img.alt = player.username;
+          li.appendChild(img);
+          let displayName = player.username;
+          if (player.nickname) {
+            displayName = `${player.nickname} (${player.username})`;
+          }
+          li.appendChild(document.createTextNode(displayName));
+          playerList.appendChild(li);
+        });
+      } catch (err) {
+        console.error(err);
+        statusElement.innerText = "서버 상태를 불러오는 중 오류가 발생했습니다.";
+      }
+    }
+    document.addEventListener("DOMContentLoaded", () => {
+      loadStatus();
+      setInterval(loadStatus, 60000); // 60초마다 자동 새로고침
+    });
+  </script>
+</body>
+</html>
